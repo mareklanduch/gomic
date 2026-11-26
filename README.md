@@ -29,6 +29,19 @@ Command-line flags:
 
 Settings are stored in `gomic/config.json` under the per-user configuration directory (`%AppData%` on Windows, `~/Library/Application Support` on macOS).
 
+## Download
+
+Ready-made builds are on the [releases page](https://github.com/mareklanduch/gomic/releases/latest):
+
+- **Windows:** unzip `gomic_<version>_windows_amd64.zip` (or `arm64`) and run `gomic.exe`.
+- **macOS:** unzip `gomic_<version>_macos_universal.zip` and move `gomic.app` wherever you like. It runs on both Apple silicon and Intel Macs.
+
+The builds are not signed with a paid developer certificate. On Windows, SmartScreen may ask you to confirm the first start. On macOS, clear the download quarantine once before opening the app:
+
+```sh
+xattr -dr com.apple.quarantine gomic.app
+```
+
 ## Building
 
 You need [Go](https://go.dev/dl/) 1.27 or newer.
@@ -71,6 +84,17 @@ go test ./...
 | `ui_darwin.go`, `ui_darwin.m`, `ui_darwin.h` | Cocoa window (cgo) |
 | `internal/capture` | Audio capture: WASAPI on Windows, [malgo](https://github.com/gen2brain/malgo) (miniaudio) on macOS |
 | `internal/meter` | Platform-independent peak scanning and bar rise/fall logic |
+
+## Releases
+
+Every push to `main` runs the tests and, when the commits call for it, publishes a new release. The version follows from the [Conventional Commits](https://www.conventionalcommits.org/) prefixes since the last tag (see `scripts/next-version.sh`):
+
+| Commit prefix | Result |
+| --- | --- |
+| `fix:` or `perf:` | Patch release (v0.3.1 to v0.3.2) |
+| `feat:` | Minor release (v0.3.1 to v0.4.0) |
+| `type!:` or a `BREAKING CHANGE:` footer | Major release (minor while below v1.0.0) |
+| Anything else (`docs:`, `ci:`, `chore:`, ...) | No release |
 
 ## Install with Go
 

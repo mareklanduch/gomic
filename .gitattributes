@@ -1,4 +1,3 @@
-* text=auto
-
-# The macOS build script must keep LF endings even when checked out on Windows.
-*.sh text eol=lf
+# LF everywhere, also on Windows checkouts: gofmt rejects CRLF, and the shell
+# scripts must keep LF to run.
+* text=auto eol=lf
