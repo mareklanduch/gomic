@@ -126,8 +126,21 @@ static void saveState(void) {
 - (NSMenu *)menuForEvent:(NSEvent *)event {
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"gomic"];
 
-    // No action, so AppKit shows it grayed out: it is a label.
-    [menu addItemWithTitle:str(_state.hasError ? _state.message : _state.device) action:NULL keyEquivalent:@""];
+    // The device picker: the system default first, then every connected input.
+    static DeviceItem items[64];
+    int count = goMenuDevices(items, 64);
+    NSMenu *devices = [[NSMenu alloc] initWithTitle:@"Input"];
+    for (int i = 0; i < count; i++) {
+        if (i == 1) {
+            [devices addItem:[NSMenuItem separatorItem]];
+        }
+        NSMenuItem *device = [devices addItemWithTitle:str(items[i].label) action:@selector(pickDevice:) keyEquivalent:@""];
+        device.target = self;
+        device.tag = i;
+        device.state = items[i].checked ? NSControlStateValueOn : NSControlStateValueOff;
+    }
+    NSMenuItem *input = [menu addItemWithTitle:@"Input" action:NULL keyEquivalent:@""];
+    input.submenu = devices;
     [menu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem *top = [menu addItemWithTitle:@"Always on top" action:@selector(toggleTopmost:) keyEquivalent:@""];
@@ -147,6 +160,10 @@ static void saveState(void) {
     gTopmost = !gTopmost;
     self.window.level = gTopmost ? NSFloatingWindowLevel : NSNormalWindowLevel;
     saveState();
+}
+
+- (void)pickDevice:(NSMenuItem *)sender {
+    goPickDevice((int)sender.tag);
 }
 
 - (void)resetClip:(id)sender {
@@ -177,6 +194,9 @@ static void saveState(void) {
         fillRect(track, rgb(0x30, 0x30, 0x34));
         if (!_state.hasError) {
             drawLevel(track, _state.level[ch], _state.hold[ch]);
+        } else if (ch == 0) {
+            // Nothing to meter: say why where the level would be.
+            drawText(str(_state.message), NSInsetRect(track, 4, 0), smallFont, clipOn, NSTextAlignmentLeft);
         }
 
         NSRect clipBox = NSMakeRect(NSMaxX(track) + 4, top, kClipW, kBarH);
@@ -191,15 +211,11 @@ static void saveState(void) {
     }
 
     CGFloat scaleTop = kPad + 2 * kBarH + kBarGap + 2;
-    if (_state.hasError) {
-        drawText(str(_state.message), NSMakeRect(barX, scaleTop, w - barX - kPad, kScaleH), smallFont, clipOn, NSTextAlignmentLeft);
-    } else {
-        const double marks[6] = {-48, -36, -24, -12, -6, 0};
-        for (int i = 0; i < 6; i++) {
-            CGFloat x = barX + dbToX(marks[i], barW);
-            NSString *label = [NSString stringWithFormat:@"%.0f", marks[i]];
-            drawText(label, NSMakeRect(x - 30, scaleTop, 30, kScaleH), smallFont, dimColor, NSTextAlignmentRight);
-        }
+    const double marks[6] = {-48, -36, -24, -12, -6, 0};
+    for (int i = 0; i < 6; i++) {
+        CGFloat x = barX + dbToX(marks[i], barW);
+        NSString *label = [NSString stringWithFormat:@"%.0f", marks[i]];
+        drawText(label, NSMakeRect(x - 30, scaleTop, 30, kScaleH), smallFont, dimColor, NSTextAlignmentRight);
     }
 }
 

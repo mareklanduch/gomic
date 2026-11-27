@@ -2,13 +2,14 @@
 
 A small always-on-top stereo peak meter with latching clip lights, for Windows and macOS.
 
-It meters the default input device (microphone, audio interface) so you can see at a glance whether your signal is too quiet or clipping. On Windows it can also meter the default output device (whatever is playing).
+It meters an input device (microphone, audio interface) so you can see at a glance whether your signal is too quiet or clipping. On Windows it can also meter an output device (whatever is playing), on its own or together with the input.
 
 ## Features
 
 - Two peak bars (green below -12 dBFS, yellow up to -3 dBFS, red above) with a peak-hold marker and a numeric readout.
 - Clip lights that stay lit until you reset them, so a clip you did not see is not a clip you missed.
-- Follows the system default device when it changes.
+- Pick the device to meter from the right-click menu: the system default, which is followed when it changes, or any connected device.
+- On Windows, show the input meter, the output meter, or both stacked in one window.
 - Borderless window you can drag from anywhere; remembers its position and the always-on-top setting.
 - No installer and no runtime dependencies. The Windows build is pure Go.
 
@@ -18,14 +19,16 @@ It meters the default input device (microphone, audio interface) so you can see 
 | --- | --- |
 | Drag anywhere | Move the window |
 | Double-click | Reset the clip lights |
-| Right-click | Menu: source (Windows), always on top, reset, quit |
+| Right-click | Menu: input and output device submenus, show input meter, show output meter, always on top, reset, quit |
 
 Command-line flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `-source input` or `-source output` | Meter this source, overriding the saved choice (`output` is Windows only) |
+| `-source input`, `-source output` or `-source both` | Show these meters, overriding the saved choice (`output` and `both` are Windows only) |
 | `-probe 5s` | Print levels to the console for this long instead of opening the window |
+
+In the window, bars labeled `1` and `2` are the input channels and `L` and `R` are the output channels. At least one meter is always visible: hiding the only one shows the other. A hidden meter does not keep its device open. macOS has no way to capture what is playing, so there the menu offers the input picker only.
 
 Settings are stored in `gomic/config.json` under the per-user configuration directory (`%AppData%` on Windows, `~/Library/Application Support` on macOS).
 
@@ -79,7 +82,7 @@ go test ./...
 
 | Path | Contents |
 | --- | --- |
-| `main.go`, `config.go`, `display.go` | Entry point, saved settings, and the meter state shared by both window implementations |
+| `main.go`, `config.go`, `display.go`, `meters.go` | Entry point, saved settings, and the meter and menu state shared by both window implementations |
 | `ui_windows.go` | Win32 window, drawn with GDI |
 | `ui_darwin.go`, `ui_darwin.m`, `ui_darwin.h` | Cocoa window (cgo) |
 | `internal/capture` | Audio capture: WASAPI on Windows, [malgo](https://github.com/gen2brain/malgo) (miniaudio) on macOS |

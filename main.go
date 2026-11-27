@@ -1,7 +1,7 @@
 //go:build windows || darwin
 
 // gomic is a small always-on-top stereo peak meter with latching clip lights
-// for the default input device (on Windows, optionally the default output).
+// for an input device and (on Windows) an output device of your choice.
 package main
 
 import (
@@ -16,58 +16,54 @@ import (
 
 func main() {
 	probe := flag.Duration("probe", 0, "print levels to the console for this long instead of opening the window")
-	source := flag.String("source", "", `"input" or "output" (overrides the saved choice)`)
+	source := flag.String("source", "", `show "input", "output" or "both" meters (overrides the saved choice)`)
 	flag.Parse()
 
 	path := ConfigPath()
 	cfg := LoadConfig(path)
 	switch *source {
 	case "":
-	case "input", "output":
-		cfg.Source = *source
+	case "input", "output", "both":
+		cfg.ShowInput, cfg.ShowOutput = *source != "output", *source != "input"
 	default:
-		fmt.Fprintf(os.Stderr, "gomic: -source must be \"input\" or \"output\", not %q\n", *source)
+		fmt.Fprintf(os.Stderr, "gomic: -source must be \"input\", \"output\" or \"both\", not %q\n", *source)
 		os.Exit(2)
 	}
+	if !capture.OutputSupported {
+		if *source == "output" || *source == "both" {
+			fmt.Fprintln(os.Stderr, "gomic: output metering is not available on this system")
+			os.Exit(2)
+		}
+		cfg.ShowInput, cfg.ShowOutput = true, false
+	}
 
-	acc := &meter.Accumulator{}
-	capt := capture.New(acc, sourceFromName(cfg.Source))
-	go capt.Run()
+	m := newMeters(cfg, path, time.Now())
+	for _, c := range m.capt {
+		go c.Run()
+	}
 
 	if *probe > 0 {
-		runProbe(acc, capt, *probe)
+		runProbe(m, *probe)
 		return
 	}
-	runWindow(acc, capt, cfg, path)
+	runWindow(m)
 }
 
-func sourceFromName(name string) capture.Source {
-	if name == "output" {
-		return capture.Output
-	}
-	return capture.Input
-}
-
-func sourceName(s capture.Source) string {
-	if s == capture.Output {
-		return "output"
-	}
-	return "input"
-}
-
-// runProbe prints what the meter would show, for checking capture without the window.
-func runProbe(acc *meter.Accumulator, capt *capture.Capturer, d time.Duration) {
+// runProbe prints what the meters would show, for checking capture without the window.
+func runProbe(m *meters, d time.Duration) {
 	end := time.Now().Add(d)
 	for time.Now().Before(end) {
 		time.Sleep(250 * time.Millisecond)
-		name, err := capt.Status()
-		if err != nil {
-			fmt.Println("error:", err)
-			continue
+		for _, src := range m.shown() {
+			name, err := m.capt[src].Status()
+			if err != nil {
+				fmt.Printf("%-6s error: %v\n", src, err)
+				continue
+			}
+			peak, clipped := m.capt[src].Acc.Take()
+			fmt.Printf("%-6s %-40s L %6.1f dB %-4s  R %6.1f dB %-4s\n", src, name,
+				meter.DB(peak[0]), clipText(clipped[0]), meter.DB(peak[1]), clipText(clipped[1]))
 		}
-		peak, clipped := acc.Take()
-		fmt.Printf("%-40s L %6.1f dB %-4s  R %6.1f dB %-4s\n", name,
-			meter.DB(peak[0]), clipText(clipped[0]), meter.DB(peak[1]), clipText(clipped[1]))
 	}
 }
 

@@ -8,15 +8,25 @@ import (
 
 // Config is what the meter remembers between runs.
 type Config struct {
-	X       int    `json:"x"`
-	Y       int    `json:"y"`
-	HasPos  bool   `json:"hasPos"`
-	Topmost bool   `json:"topmost"`
-	Source  string `json:"source"` // "input" or "output"
+	X       int  `json:"x"`
+	Y       int  `json:"y"`
+	HasPos  bool `json:"hasPos"`
+	Topmost bool `json:"topmost"`
+
+	// Which meters are visible. At least one always is.
+	ShowInput  bool `json:"showInput"`
+	ShowOutput bool `json:"showOutput"`
+
+	// The chosen devices. An empty ID follows the system default; the name
+	// is kept so a device that is not connected can still be named.
+	InputDevice      string `json:"inputDevice"`
+	InputDeviceName  string `json:"inputDeviceName"`
+	OutputDevice     string `json:"outputDevice"`
+	OutputDeviceName string `json:"outputDeviceName"`
 }
 
 // DefaultConfig is used on first run and when the saved file is unusable.
-func DefaultConfig() Config { return Config{Topmost: true, Source: "input"} }
+func DefaultConfig() Config { return Config{Topmost: true, ShowInput: true} }
 
 // ConfigPath returns the per-user settings file location.
 func ConfigPath() string {
@@ -34,11 +44,21 @@ func LoadConfig(path string) Config {
 	if err != nil {
 		return c
 	}
-	if json.Unmarshal(data, &c) != nil {
+	// Files written before the two meters could be shown together have no
+	// show flags, only a single source.
+	legacy := struct {
+		Source     string `json:"source"`
+		ShowInput  *bool  `json:"showInput"`
+		ShowOutput *bool  `json:"showOutput"`
+	}{}
+	if json.Unmarshal(data, &c) != nil || json.Unmarshal(data, &legacy) != nil {
 		return DefaultConfig()
 	}
-	if c.Source != "input" && c.Source != "output" {
-		c.Source = "input"
+	if legacy.ShowInput == nil && legacy.ShowOutput == nil {
+		c.ShowInput, c.ShowOutput = legacy.Source != "output", legacy.Source == "output"
+	}
+	if !c.ShowInput && !c.ShowOutput {
+		c.ShowInput = true
 	}
 	return c
 }

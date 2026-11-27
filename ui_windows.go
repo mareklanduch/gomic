@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -15,10 +16,11 @@ import (
 
 // Layout in 96-dpi pixels; scaled by the system DPI at startup.
 const (
-	winW, winH   = 292, 68
+	winW         = 292
 	pad          = 8
 	labelW       = 14
 	barH, barGap = 16, 6
+	groupGap     = 10 // between the input pair and the output pair
 	clipW        = 16
 	valueW       = 44
 	scaleH       = 12
@@ -31,19 +33,16 @@ const (
 var scaleMarks = []float64{-48, -36, -24, -12, -6, 0}
 
 type ui struct {
-	display
-	hwnd    uintptr
-	scale   float64
-	capt    *capture.Capturer
-	cfg     Config
-	cfgPath string
+	*meters
+	hwnd  uintptr
+	scale float64
 
 	font, smallFont uintptr
 }
 
 var app *ui
 
-func runWindow(acc *meter.Accumulator, capt *capture.Capturer, cfg Config, cfgPath string) {
+func runWindow(m *meters) {
 	runtime.LockOSThread()
 	procSetProcessDpiAwarenessContext.Call(dpiAwarenessSystemAware)
 	dpi, _, _ := procGetDpiForSystem.Call()
@@ -51,10 +50,8 @@ func runWindow(acc *meter.Accumulator, capt *capture.Capturer, cfg Config, cfgPa
 		dpi = 96
 	}
 
-	app = &ui{
-		display: newDisplay(acc, time.Now()),
-		scale:   float64(dpi) / 96, capt: capt, cfg: cfg, cfgPath: cfgPath,
-	}
+	app = &ui{meters: m, scale: float64(dpi) / 96}
+	cfg := m.cfg
 	app.font = app.makeFont(13, "Segoe UI")
 	app.smallFont = app.makeFont(10, "Segoe UI")
 
@@ -68,7 +65,7 @@ func runWindow(acc *meter.Accumulator, capt *capture.Capturer, cfg Config, cfgPa
 	wc.size = uint32(unsafe.Sizeof(wc))
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 
-	w, h := app.px(winW), app.px(winH)
+	w, h := app.px(winW), app.px(winHeight(len(m.shown())))
 	x, y := app.startPosition(w)
 	exStyle := uintptr(0)
 	if cfg.Topmost {
@@ -82,14 +79,14 @@ func runWindow(acc *meter.Accumulator, capt *capture.Capturer, cfg Config, cfgPa
 	}
 	procSetTimer.Call(app.hwnd, 1, frameMS, 0)
 
-	var m msg
+	var next msg
 	for {
-		r, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
+		r, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&next)), 0, 0, 0)
 		if int32(r) <= 0 {
 			break
 		}
-		procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
-		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
+		procTranslateMessage.Call(uintptr(unsafe.Pointer(&next)))
+		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&next)))
 	}
 }
 
@@ -147,50 +144,54 @@ func (u *ui) paint(hwnd uintptr) {
 
 	fill(mem, rect{0, 0, w, h}, colBackground)
 
-	_, err := u.capt.Status()
-	labels := [2]string{"1", "2"}
-	if u.capt.Source() == capture.Output {
-		labels = [2]string{"L", "R"}
-	}
-
 	barX := u.px(pad + labelW)
 	barW := w - barX - u.px(pad+valueW+4+clipW+4)
-	for ch := 0; ch < 2; ch++ {
-		top := u.px(pad + ch*(barH+barGap))
-		bottom := top + u.px(barH)
-
-		text(mem, u.font, colText, labels[ch], rect{u.px(pad), top, barX, bottom}, dtLeft)
-
-		track := rect{barX, top, barX + barW, bottom}
-		fill(mem, track, colTrack)
-		if err == nil {
-			u.drawLevel(mem, track, u.bars[ch])
+	groupTop := pad
+	for _, src := range u.shown() {
+		_, err := u.capt[src].Status()
+		d := &u.disp[src]
+		labels := [2]string{"1", "2"}
+		if src == capture.Output {
+			labels = [2]string{"L", "R"}
 		}
+		for ch := 0; ch < 2; ch++ {
+			top := u.px(groupTop + ch*(barH+barGap))
+			bottom := top + u.px(barH)
 
-		clipBox := rect{track.right + u.px(4), top, track.right + u.px(4+clipW), bottom}
-		if u.clip[ch] {
-			fill(mem, clipBox, colClipOn)
-		} else {
-			fill(mem, clipBox, colClipOff)
-		}
+			text(mem, u.font, colText, labels[ch], rect{u.px(pad), top, barX, bottom}, dtLeft)
 
-		value := "-∞"
-		if hold := u.bars[ch].Hold; err == nil && hold > floorDB {
-			value = fmt.Sprintf("%.1f", hold)
+			track := rect{barX, top, barX + barW, bottom}
+			fill(mem, track, colTrack)
+			switch {
+			case err == nil:
+				u.drawLevel(mem, track, d.bars[ch])
+			case ch == 0:
+				// Nothing to meter: say why where the level would be.
+				text(mem, u.smallFont, colClipOn, err.Error(),
+					rect{track.left + u.px(4), top, track.right - u.px(4), bottom}, dtLeft|dtEndEllipsis)
+			}
+
+			clipBox := rect{track.right + u.px(4), top, track.right + u.px(4+clipW), bottom}
+			if d.clip[ch] {
+				fill(mem, clipBox, colClipOn)
+			} else {
+				fill(mem, clipBox, colClipOff)
+			}
+
+			value := "-∞"
+			if hold := d.bars[ch].Hold; err == nil && hold > floorDB {
+				value = fmt.Sprintf("%.1f", hold)
+			}
+			text(mem, u.font, colText, value, rect{clipBox.right + u.px(4), top, w - u.px(pad), bottom}, dtRight)
 		}
-		text(mem, u.font, colText, value, rect{clipBox.right + u.px(4), top, w - u.px(pad), bottom}, dtRight)
+		groupTop += groupH + groupGap
 	}
 
-	scaleTop := u.px(pad + 2*barH + barGap + 2)
-	scaleRect := rect{barX, scaleTop, barX + barW, scaleTop + u.px(scaleH)}
-	if err != nil {
-		text(mem, u.smallFont, colClipOn, err.Error(), scaleRect, dtLeft)
-	} else {
-		for _, db := range scaleMarks {
-			x := barX + dbToX(db, barW)
-			label := fmt.Sprintf("%.0f", db)
-			text(mem, u.smallFont, colDim, label, rect{x - u.px(30), scaleTop, x, scaleTop + u.px(scaleH)}, dtRight)
-		}
+	scaleTop := u.px(groupTop - groupGap + 2)
+	for _, db := range scaleMarks {
+		x := barX + dbToX(db, barW)
+		label := fmt.Sprintf("%.0f", db)
+		text(mem, u.smallFont, colDim, label, rect{x - u.px(30), scaleTop, x, scaleTop + u.px(scaleH)}, dtRight)
 	}
 	procBitBlt.Call(hdc, 0, 0, uintptr(w), uintptr(h), mem, 0, 0, srcCopy)
 }
@@ -229,40 +230,66 @@ func dbToX(db float64, width int32) int32 {
 	return int32(f*float64(width) + 0.5)
 }
 
+// groupH is the height of one meter: two bars and the gap between them.
+const groupH = 2*barH + barGap
+
+// winHeight is the window height, in 96-dpi pixels, with n meters visible.
+func winHeight(n int) int {
+	return pad + n*groupH + (n-1)*groupGap + 2 + scaleH + pad
+}
+
+// Menu command ids. Device entries are the base plus their position in the submenu.
+const (
+	idShowInput = iota + 1
+	idShowOutput
+	idTopmost
+	idReset
+	idQuit
+
+	idInputDevices  = 1000
+	idOutputDevices = 2000
+	maxDevices      = 1000
+)
+
 func (u *ui) menu(hwnd uintptr) {
-	const (
-		idInput = iota + 1
-		idOutput
-		idTopmost
-		idReset
-		idQuit
-	)
 	check := func(on bool) uintptr {
 		if on {
 			return mfChecked
 		}
 		return 0
 	}
-	name, err := u.capt.Status()
-	if err != nil {
-		name = err.Error()
+	add := func(menu, flags, id uintptr, label string) {
+		procAppendMenuW.Call(menu, flags, id, uintptr(unsafe.Pointer(utf16(label))))
 	}
-	src := u.capt.Source()
+	// A device submenu; destroyed together with the menu it is attached to.
+	pickers := [2][]pickerEntry{u.picker(capture.Input), u.picker(capture.Output)}
+	submenu := func(src capture.Source, base uintptr) uintptr {
+		sub, _, _ := procCreatePopupMenu.Call()
+		for i, e := range pickers[src] {
+			if i == maxDevices {
+				break
+			}
+			if i == 1 {
+				add(sub, mfSeparator, 0, "")
+			}
+			// "&" would otherwise underline the next letter.
+			add(sub, check(e.checked), base+uintptr(i), strings.ReplaceAll(e.label, "&", "&&"))
+		}
+		return sub
+	}
 
 	m, _, _ := procCreatePopupMenu.Call()
 	defer procDestroyMenu.Call(m)
-	add := func(flags, id uintptr, label string) {
-		procAppendMenuW.Call(m, flags, id, uintptr(unsafe.Pointer(utf16(label))))
-	}
-	add(mfGrayed, 0, name)
-	add(mfSeparator, 0, "")
-	add(check(src == capture.Input), idInput, "Meter default input (microphone)")
-	add(check(src == capture.Output), idOutput, "Meter default output (playback)")
-	add(mfSeparator, 0, "")
-	add(check(u.cfg.Topmost), idTopmost, "Always on top")
-	add(0, idReset, "Reset clip lights\tDouble-click")
-	add(mfSeparator, 0, "")
-	add(0, idQuit, "Quit")
+	add(m, mfPopup, submenu(capture.Input, idInputDevices), "Input")
+	add(m, mfPopup, submenu(capture.Output, idOutputDevices), "Output")
+	add(m, mfSeparator, 0, "")
+	add(m, check(u.cfg.ShowInput), idShowInput, "Show input meter")
+	add(m, check(u.cfg.ShowOutput), idShowOutput, "Show output meter")
+	add(m, mfSeparator, 0, "")
+	add(m, check(u.cfg.Topmost), idTopmost, "Always on top")
+	add(m, 0, idReset, "Reset clip lights\tDouble-click")
+	add(m, mfSeparator, 0, "")
+	add(m, 0, idQuit, "Quit")
 
 	var pt point
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
@@ -270,17 +297,24 @@ func (u *ui) menu(hwnd uintptr) {
 	cmd, _, _ := procTrackPopupMenu.Call(m, tpmReturnCmd|tpmRightButton,
 		uintptr(pt.x), uintptr(pt.y), 0, hwnd, 0)
 
-	switch cmd {
-	case idInput, idOutput:
-		s := capture.Input
-		if cmd == idOutput {
-			s = capture.Output
-		}
-		u.capt.SetSource(s)
-		u.cfg.Source = sourceName(s)
-		u.resetClip()
+	switch {
+	case cmd >= idOutputDevices && int(cmd-idOutputDevices) < len(pickers[capture.Output]):
+		u.pick(capture.Output, pickers[capture.Output][cmd-idOutputDevices].device)
 		u.save(hwnd)
-	case idTopmost:
+	case cmd >= idInputDevices && int(cmd-idInputDevices) < len(pickers[capture.Input]):
+		u.pick(capture.Input, pickers[capture.Input][cmd-idInputDevices].device)
+		u.save(hwnd)
+	case cmd == idShowInput, cmd == idShowOutput:
+		src := capture.Input
+		if cmd == idShowOutput {
+			src = capture.Output
+		}
+		u.toggleShow(src)
+		// The window grows or shrinks downward; its top-left corner stays put.
+		procSetWindowPos.Call(hwnd, 0, 0, 0, uintptr(u.px(winW)), uintptr(u.px(winHeight(len(u.shown())))),
+			swpNoMove|swpNoZOrder|swpNoActivate)
+		u.save(hwnd)
+	case cmd == idTopmost:
 		u.cfg.Topmost = !u.cfg.Topmost
 		after := hwndNoTopmost
 		if u.cfg.Topmost {
@@ -288,9 +322,9 @@ func (u *ui) menu(hwnd uintptr) {
 		}
 		procSetWindowPos.Call(hwnd, after, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
 		u.save(hwnd)
-	case idReset:
+	case cmd == idReset:
 		u.resetClip()
-	case idQuit:
+	case cmd == idQuit:
 		procDestroyWindow.Call(hwnd)
 	}
 }
@@ -415,20 +449,23 @@ const (
 
 	swpNoSize     = 0x0001
 	swpNoMove     = 0x0002
+	swpNoZOrder   = 0x0004
 	swpNoActivate = 0x0010
 
 	mfGrayed       = 0x0001
 	mfChecked      = 0x0008
+	mfPopup        = 0x0010
 	mfSeparator    = 0x0800
 	tpmRightButton = 0x0002
 	tpmReturnCmd   = 0x0100
 
-	dtLeft       = 0x0000
-	dtRight      = 0x0002
-	dtVCenter    = 0x0004
-	dtSingleLine = 0x0020
-	dtNoClip     = 0x0100
-	dtNoPrefix   = 0x0800
+	dtLeft        = 0x0000
+	dtRight       = 0x0002
+	dtVCenter     = 0x0004
+	dtSingleLine  = 0x0020
+	dtNoClip      = 0x0100
+	dtNoPrefix    = 0x0800
+	dtEndEllipsis = 0x8000
 
 	bkTransparent        = 1
 	srcCopy              = 0x00CC0020

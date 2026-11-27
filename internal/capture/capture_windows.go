@@ -15,6 +15,9 @@ import (
 	"github.com/mareklanduch/gomic/internal/meter"
 )
 
+// OutputSupported reports whether this platform can meter playback devices.
+const OutputSupported = true
+
 // Run captures forever, reopening the device when it changes or fails.
 func (c *Capturer) Run() {
 	runtime.LockOSThread()
@@ -37,18 +40,39 @@ func (c *Capturer) Run() {
 	defer release(enum)
 
 	for {
-		if err := c.session(enum); err != nil {
+		devices := c.refreshDevices(enum)
+		if !c.Enabled() {
+			c.setStatus("", nil)
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+		if err := c.session(enum, devices); err != nil {
 			c.setStatus("", err)
 			time.Sleep(time.Second)
 		}
 	}
 }
 
-// session meters one device until the default device or the source changes
-// (returns nil) or something fails (returns the error).
-func (c *Capturer) session(enum unsafe.Pointer) error {
-	src := c.Source()
-	dev, err := defaultDevice(enum, src)
+// refreshDevices publishes the connected devices for the menu and returns them.
+func (c *Capturer) refreshDevices(enum unsafe.Pointer) []Device {
+	devices := listDevices(enum, c.src)
+	defaultName := ""
+	if dev, err := defaultDevice(enum, c.src); err == nil {
+		defaultName = friendlyName(dev)
+		release(dev)
+	}
+	c.setDevices(devices, defaultName)
+	return devices
+}
+
+// session meters one device until the selection, the default device, or the
+// enabled state changes (returns nil) or something fails (returns the error).
+func (c *Capturer) session(enum unsafe.Pointer, devices []Device) error {
+	src, want := c.src, c.Selected()
+	if err := checkConnected(want, devices); err != nil {
+		return err
+	}
+	dev, err := openDevice(enum, src, want)
 	if err != nil {
 		return err
 	}
@@ -128,11 +152,15 @@ func (c *Capturer) session(enum unsafe.Pointer) error {
 			}
 		}
 
-		if c.Source() != src {
+		if !c.Enabled() || c.Selected().ID != want.ID {
 			return nil
 		}
 		if time.Since(lastCheck) > time.Second {
 			lastCheck = time.Now()
+			c.refreshDevices(enum)
+			if want.ID != "" {
+				continue // a chosen device does not follow the default
+			}
 			cur, err := defaultDevice(enum, src)
 			if err != nil {
 				return err
@@ -149,18 +177,64 @@ func (c *Capturer) session(enum unsafe.Pointer) error {
 	}
 }
 
-func defaultDevice(enum unsafe.Pointer, src Source) (unsafe.Pointer, error) {
-	flow, what := uintptr(dataFlowCapture), "input"
-	if src == Output {
-		flow, what = dataFlowRender, "output"
+// openDevice returns the chosen device, or the default one when none is chosen.
+func openDevice(enum unsafe.Pointer, src Source, want Device) (unsafe.Pointer, error) {
+	if want.ID == "" {
+		return defaultDevice(enum, src)
+	}
+	id, err := syscall.UTF16PtrFromString(want.ID)
+	if err != nil {
+		return nil, checkConnected(want, nil)
 	}
 	var dev unsafe.Pointer
-	hr := call(enum, 4, flow, roleConsole, uintptr(unsafe.Pointer(&dev))) // GetDefaultAudioEndpoint
+	if hr := call(enum, 5, uintptr(unsafe.Pointer(id)), uintptr(unsafe.Pointer(&dev))); failed(hr) { // GetDevice
+		return nil, checkConnected(want, nil)
+	}
+	return dev, nil
+}
+
+// listDevices returns the connected devices on one side, in system order.
+func listDevices(enum unsafe.Pointer, src Source) []Device {
+	var coll unsafe.Pointer
+	if hr := call(enum, 3, // EnumAudioEndpoints
+		dataFlow(src), deviceStateActive, uintptr(unsafe.Pointer(&coll))); failed(hr) {
+		return nil
+	}
+	defer release(coll)
+
+	var count uint32
+	if hr := call(coll, 3, uintptr(unsafe.Pointer(&count))); failed(hr) { // IMMDeviceCollection::GetCount
+		return nil
+	}
+	devices := make([]Device, 0, count)
+	for i := uint32(0); i < count; i++ {
+		var dev unsafe.Pointer
+		if hr := call(coll, 4, uintptr(i), uintptr(unsafe.Pointer(&dev))); failed(hr) { // Item
+			continue
+		}
+		if id, err := deviceID(dev); err == nil {
+			devices = append(devices, Device{ID: id, Name: friendlyName(dev)})
+		}
+		release(dev)
+	}
+	return devices
+}
+
+func dataFlow(src Source) uintptr {
+	if src == Output {
+		return dataFlowRender
+	}
+	return dataFlowCapture
+}
+
+func defaultDevice(enum unsafe.Pointer, src Source) (unsafe.Pointer, error) {
+	var dev unsafe.Pointer
+	hr := call(enum, 4, dataFlow(src), roleConsole, uintptr(unsafe.Pointer(&dev))) // GetDefaultAudioEndpoint
 	if uint32(hr) == hrNotFound {
-		return nil, fmt.Errorf("no default %s device", what)
+		return nil, fmt.Errorf("no default %s device", src)
 	}
 	if failed(hr) {
-		return nil, hresult("get default "+what+" device", hr)
+		return nil, hresult(fmt.Sprintf("get default %s device", src), hr)
 	}
 	return dev, nil
 }
@@ -231,6 +305,7 @@ const (
 	dataFlowRender       = 0
 	dataFlowCapture      = 1
 	roleConsole          = 0
+	deviceStateActive    = 1
 	shareModeShared      = 0
 	streamFlagsLoopback  = 0x00020000
 	bufferFlagsSilent    = 0x2

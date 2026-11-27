@@ -13,26 +13,26 @@ import (
 	"runtime"
 	"time"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/mareklanduch/gomic/internal/capture"
-	"github.com/mareklanduch/gomic/internal/meter"
 )
 
 // Cocoa requires the event loop on the process's first thread; locking in
 // init keeps main() there.
 func init() { runtime.LockOSThread() }
 
+// macOS meters the input only, so the window always shows that one meter.
 type macUI struct {
-	display
-	capt    *capture.Capturer
-	cfg     Config
-	cfgPath string
+	*meters
+	offered []pickerEntry // the device submenu as last shown
 }
 
 var app *macUI
 
-func runWindow(acc *meter.Accumulator, capt *capture.Capturer, cfg Config, cfgPath string) {
-	app = &macUI{display: newDisplay(acc, time.Now()), capt: capt, cfg: cfg, cfgPath: cfgPath}
+func runWindow(m *meters) {
+	app = &macUI{meters: m}
+	cfg := m.cfg
 	C.gomicRun(cBool(cfg.HasPos), C.double(cfg.X), C.double(cfg.Y), cBool(cfg.Topmost))
 }
 
@@ -42,12 +42,13 @@ func runWindow(acc *meter.Accumulator, capt *capture.Capturer, cfg Config, cfgPa
 func goTick(s *C.MeterState) {
 	u := app
 	u.tick(time.Now())
+	d := &u.disp[capture.Input]
 	for ch := 0; ch < 2; ch++ {
-		s.level[ch] = C.double(u.bars[ch].Level)
-		s.hold[ch] = C.double(u.bars[ch].Hold)
-		s.clip[ch] = cBool(u.clip[ch])
+		s.level[ch] = C.double(d.bars[ch].Level)
+		s.hold[ch] = C.double(d.bars[ch].Hold)
+		s.clip[ch] = cBool(d.clip[ch])
 	}
-	name, err := u.capt.Status()
+	name, err := u.capt[capture.Input].Status()
 	message := ""
 	if err != nil {
 		message = err.Error()
@@ -70,8 +71,37 @@ func goSaveState(x, y C.double, topmost C.int) {
 	u := app
 	u.cfg.X, u.cfg.Y, u.cfg.HasPos = int(x), int(y), true
 	u.cfg.Topmost = topmost != 0
-	u.cfg.Source = "input"
 	_ = u.cfg.Save(u.cfgPath) // losing the saved position is not worth interrupting for
+}
+
+// goMenuDevices fills out with the input device submenu (at most max lines)
+// and returns how many lines there are. Line 0 is the system default.
+//
+//export goMenuDevices
+func goMenuDevices(out *C.DeviceItem, max C.int) C.int {
+	u := app
+	u.offered = u.picker(capture.Input)
+	if len(u.offered) > int(max) {
+		u.offered = u.offered[:max]
+	}
+	items := unsafe.Slice(out, int(max))
+	for i, e := range u.offered {
+		setCString(items[i].label[:], e.label)
+		items[i].checked = cBool(e.checked)
+	}
+	return C.int(len(u.offered))
+}
+
+// goPickDevice is called when a line of the device submenu is chosen.
+//
+//export goPickDevice
+func goPickDevice(i C.int) {
+	u := app
+	if i < 0 || int(i) >= len(u.offered) {
+		return
+	}
+	u.pick(capture.Input, u.offered[i].device)
+	_ = u.cfg.Save(u.cfgPath)
 }
 
 func cBool(b bool) C.int {
