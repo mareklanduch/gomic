@@ -39,30 +39,32 @@ jobs:
         if: steps.version.outputs.next == ''
         run: echo "No feat, fix, or perf commits since the last release; nothing to publish." >> "$GITHUB_STEP_SUMMARY"
 
-  # Windows is pure Go, so both architectures cross-compile on Linux.
+  # MSVC builds, which need no extra runtime files next to the program.
   windows:
     name: Build for Windows
     needs: version
     if: needs.version.outputs.next != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: windows-latest
+    timeout-minutes: 30
     env:
       NEXT: ${{ needs.version.outputs.next }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version-file: go.mod
+      - name: Install the Rust toolchain
+        run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc,aarch64-pc-windows-msvc --no-self-update
 
       - name: Build and zip
+        shell: bash
         run: |
+          export GOMIC_VERSION="${NEXT#v}"
           mkdir dist
-          for arch in amd64 arm64; do
-            GOOS=windows GOARCH=$arch CGO_ENABLED=0 \
-              go build -trimpath -ldflags "-s -w -H=windowsgui" -o gomic.exe .
-            zip -j "dist/gomic_${NEXT#v}_windows_${arch}.zip" gomic.exe LICENSE README.md
-            rm gomic.exe
+          for pair in amd64:x86_64 arm64:aarch64; do
+            arch=${pair%%:*}
+            target=${pair##*:}-pc-windows-msvc
+            cargo build --release --locked --target "$target"
+            7z a "dist/gomic_${NEXT#v}_windows_${arch}.zip" \
+              "./target/$target/release/gomic.exe" ./LICENSE ./README.md ./README.html
           done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -71,21 +73,19 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  # macOS needs cgo (Cocoa and miniaudio), so it is built on a Mac.
   macos:
     name: Build for macOS
     needs: version
     if: needs.version.outputs.next != ''
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       NEXT: ${{ needs.version.outputs.next }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version-file: go.mod
+      - name: Install the Rust toolchain
+        run: rustup toolchain install stable --profile minimal --no-self-update
 
       - name: Build the universal app and zip it
         run: |

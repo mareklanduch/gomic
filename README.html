@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gomic, Rust edition</title>
+<style>
+  :root {
+    --bg: #f6f6f4;
+    --surface: #ffffff;
+    --ink: #1b1b1d;
+    --muted: #5f6066;
+    --line: #dcdcd8;
+    --accent: #1f8a3d;
+    --code-bg: #1b1b1d;
+    --code-ink: #e6e6ea;
+    --go: #0b7d99;
+    --rust: #b7410e;
+    --warn-bg: #fff6d6;
+    --warn-line: #e6c229;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141416;
+      --surface: #1b1b1d;
+      --ink: #e6e6ea;
+      --muted: #9a9aa2;
+      --line: #303034;
+      --accent: #3ccf5a;
+      --code-bg: #0e0e10;
+      --code-ink: #e6e6ea;
+      --go: #5cc8e0;
+      --rust: #f08a5d;
+      --warn-bg: #2b2610;
+      --warn-line: #8a7416;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 0 16px 80px; }
+  header { padding: 56px 0 8px; }
+  h1 { font-size: 2.3rem; line-height: 1.15; margin: 0 0 8px; letter-spacing: -0.02em; }
+  h1 small { font-size: 1rem; font-weight: 600; color: var(--rust); letter-spacing: 0; margin-left: 8px; }
+  .lede { font-size: 1.15rem; color: var(--muted); margin: 0 0 24px; max-width: 60ch; }
+  h2 { font-size: 1.45rem; margin: 56px 0 12px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.05rem; margin: 28px 0 8px; }
+  p { margin: 0 0 14px; }
+  a { color: var(--accent); }
+  nav { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 20px 0 0; font-size: 0.95rem; }
+  nav a { text-decoration: none; border-bottom: 1px solid transparent; }
+  nav a:hover { border-bottom-color: currentColor; }
+  figure { margin: 24px 0 0; }
+  figure img { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); display: block; }
+  figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 8px; }
+  code { font: 0.9em/1.5 ui-monospace, "Cascadia Code", Consolas, Menlo, monospace; }
+  :not(pre) > code { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+  pre {
+    background: var(--code-bg); color: var(--code-ink);
+    padding: 14px 16px; border-radius: 8px; overflow-x: auto; margin: 0 0 16px;
+  }
+  pre code { font-size: 0.88rem; }
+  .table-wrap { overflow-x: auto; margin: 0 0 16px; }
+  table { border-collapse: collapse; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  thead th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  th.go { color: var(--go); }
+  th.rust { color: var(--rust); }
+  td:first-child { font-weight: 600; min-width: 9.5em; }
+  td code { overflow-wrap: anywhere; }
+  .note {
+    background: var(--warn-bg); border-left: 4px solid var(--warn-line);
+    padding: 12px 14px; border-radius: 0 8px 8px 0; margin: 0 0 16px;
+  }
+  .note p:last-child { margin-bottom: 0; }
+  ul { padding-left: 1.2em; margin: 0 0 14px; }
+  li { margin-bottom: 6px; }
+  footer { margin-top: 56px; color: var(--muted); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>gomic <small>Rust edition</small></h1>
+  <p class="lede">A small always-on-top stereo peak meter with latching clip lights, for Windows and macOS. This branch is the Go program rewritten in Rust.</p>
+  <figure>
+    <img src="docs/screenshot.png" alt="The meter window showing an input meter and an output meter, with the right-click menu and the Input device submenu open" width="520" height="200">
+    <figcaption>The Windows build running under Wine. Bars 1 and 2 are the input; L and R are the output, which Wine cannot capture, so it shows the reason instead of a level.</figcaption>
+  </figure>
+  <nav>
+    <a href="#install">Install</a>
+    <a href="#use">Using it</a>
+    <a href="#differences">Rust vs Go</a>
+    <a href="#tested">What was tested</a>
+    <a href="#develop">Development</a>
+  </nav>
+</header>
+
+<h2 id="install">Install</h2>
+
+<p>You need <a href="https://rustup.rs">Rust</a> 1.95 or newer. Installing it with <code>rustup</code> also gives you <code>cargo</code>, the build tool used below.</p>
+
+<h3>The <code>go install</code> equivalent</h3>
+
+<p>Yes, there is one: <code>cargo install</code>. It downloads the source, builds an optimized binary, and puts it on your <code>PATH</code>.</p>
+
+<pre><code>cargo install --git https://github.com/mareklanduch/gomic --branch claude/rust-rewrite --locked</code></pre>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th></th><th class="go">Go</th><th class="rust">Rust</th></tr></thead>
+  <tbody>
+    <tr><td>Command</td><td><code>go install github.com/mareklanduch/gomic@latest</code></td><td><code>cargo install --git https://github.com/mareklanduch/gomic --branch claude/rust-rewrite --locked</code></td></tr>
+    <tr><td>Where the program lands</td><td><code>~/go/bin</code></td><td><code>~/.cargo/bin</code> (<code>%USERPROFILE%\.cargo\bin</code> on Windows)</td></tr>
+    <tr><td>Hide the console on Windows</td><td>Add <code>-ldflags "-H=windowsgui"</code></td><td>Nothing to add; it is set in the source</td></tr>
+    <tr><td>Pin exact dependency versions</td><td>Always, through <code>go.sum</code></td><td>Add <code>--locked</code>, which uses the committed <code>Cargo.lock</code></td></tr>
+    <tr><td>Pick a version</td><td><code>@v0.2.0</code>, <code>@latest</code>, <code>@&lt;commit&gt;</code></td><td><code>--tag v0.2.0</code>, <code>--branch name</code>, <code>--rev &lt;commit&gt;</code></td></tr>
+    <tr><td>Update</td><td>Run the command again</td><td>Run the command again</td></tr>
+    <tr><td>Uninstall</td><td>Delete the file</td><td><code>cargo uninstall gomic</code></td></tr>
+    <tr><td>First build</td><td>Seconds</td><td>A few minutes, because about 135 dependency crates are compiled</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>The even shorter <code>cargo install gomic</code> only works for programs published on <a href="https://crates.io">crates.io</a>. This one is not published there, so use the <code>--git</code> form above.</p>
+
+<h3>Windows</h3>
+
+<p>Run the <code>cargo install</code> command above, then start <code>gomic</code> from the Start menu's Run box, a shortcut, or a terminal. If the build complains about a missing linker, install the "Desktop development with C++" workload of the Visual Studio Build Tools; <code>rustup</code> offers to do this during setup.</p>
+
+<h3>macOS</h3>
+
+<p>Build the app bundle rather than a bare binary. macOS only grants audio access to a signed bundle that says why it wants it, and <code>build_mac.sh</code> takes care of both. It needs the Xcode command line tools (<code>xcode-select --install</code>).</p>
+
+<pre><code>git clone --branch claude/rust-rewrite https://github.com/mareklanduch/gomic
+cd gomic
+sh build_mac.sh
+open gomic.app</code></pre>
+
+<p>macOS 14.2 or newer is required. Metering an output device needs macOS 14.6 or newer.</p>
+
+<h3>From a checkout</h3>
+
+<pre><code>cargo run --release          # build and start
+cargo build --release        # the binary is target/release/gomic
+cargo install --path .       # install this checkout into ~/.cargo/bin</code></pre>
+
+<h3>Linux</h3>
+
+<p>Not a supported platform, but it builds (install <code>libasound2-dev</code> first) and meters inputs through ALSA. There is no output metering, and the menu is drawn inside the small window, where it gets clipped.</p>
+
+<h2 id="use">Using it</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Action</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td>Drag anywhere</td><td>Move the window</td></tr>
+    <tr><td>Double-click</td><td>Reset the clip lights</td></tr>
+    <tr><td>Right-click</td><td>Menu: Input and Output device submenus, Show input meter, Show output meter, Always on top, Reset clip lights, Quit</td></tr>
+  </tbody>
+</table>
+</div>
+
+<ul>
+  <li>Each device submenu lists "Default", which follows the system default when it changes, and every connected device.</li>
+  <li>Bars labeled <code>1</code> and <code>2</code> are the input channels; <code>L</code> and <code>R</code> are the output channels.</li>
+  <li>At least one meter is always visible: hiding the only one shows the other. A hidden meter does not keep its device open.</li>
+  <li>Bars are green below -12 dBFS, yellow up to -3 dBFS, and red above. A clip light stays lit until you reset it.</li>
+</ul>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>--source input|output|both</code></td><td>Show these meters, overriding the saved choice</td></tr>
+    <tr><td><code>--probe 5s</code></td><td>Print levels to the console for this long instead of opening the window</td></tr>
+    <tr><td><code>--reset-position</code></td><td>Forget the saved window position and start in the top-right corner</td></tr>
+    <tr><td><code>--help</code>, <code>--version</code></td><td>Show the options or the version</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Settings are stored in <code>gomic/config.json</code> under the per-user configuration directory: <code>%AppData%</code> on Windows, <code>~/Library/Application Support</code> on macOS.</p>
+
+<h2 id="differences">Rust vs Go</h2>
+
+<p>The window looks and behaves the same. The differences are in how it is built, what it depends on, and a few details at the edges.</p>
+
+<h3>For someone using the program</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th></th><th class="go">Go</th><th class="rust">Rust</th></tr></thead>
+  <tbody>
+    <tr><td>Flags</td><td>One dash: <code>-source</code>, <code>-probe</code></td><td>Two dashes: <code>--source</code>, <code>--probe</code>. Adds <code>--reset-position</code>, <code>--help</code>, <code>--version</code></td></tr>
+    <tr><td>Output meter on macOS</td><td>Not available; the menu only offers the input picker</td><td>Offered, through system audio capture on macOS 14.6 or newer. Not tested on a Mac</td></tr>
+    <tr><td>Oldest macOS</td><td>11</td><td>14.2</td></tr>
+    <tr><td>Console window on Windows</td><td>Appears unless built with <code>-H=windowsgui</code>; then <code>-probe</code> prints nothing</td><td>Never appears. Started from a terminal, <code>--probe</code> and <code>--help</code> still print there</td></tr>
+    <tr><td>Program size (Windows, 64-bit)</td><td>2.9 MB</td><td>5.3 MB</td></tr>
+    <tr><td>Drawing</td><td>Windows GDI and Cocoa, on the CPU</td><td>OpenGL, so it needs a working graphics driver</td></tr>
+    <tr><td>Text</td><td>The system font (Segoe UI, San Francisco)</td><td>The font bundled with the GUI library, identical on every system</td></tr>
+    <tr><td>Saved window position</td><td>Ignored if it is no longer on any screen</td><td>Used as saved. If the window ends up off-screen, start once with <code>--reset-position</code></td></tr>
+    <tr><td>Settings file</td><td colspan="2">Same file and field names, so position, always-on-top, and which meters are shown carry over. Device choices do not: the two versions name devices differently, so a device picked in one shows as "not connected" in the other until you pick it again. On a display scaled above 100% the saved position can also be off, because Go stores pixels and Rust stores scaled points.</td></tr>
+    <tr><td>Linux</td><td>Does not build</td><td>Builds and meters inputs, unsupported</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>For someone reading or changing the code</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th></th><th class="go">Go</th><th class="rust">Rust</th></tr></thead>
+  <tbody>
+    <tr><td>Window code</td><td>Written twice: Win32 calls in Go, and Cocoa in Objective-C through cgo, kept in step by hand</td><td>Written once with <code>eframe</code>/<code>egui</code>, the same on every system</td></tr>
+    <tr><td>Menu</td><td>Built twice, with Win32 and with <code>NSMenu</code></td><td>Described once as data (<code>src/menu.rs</code>) and shown natively through <code>muda</code></td></tr>
+    <tr><td>Audio</td><td>Hand-written WASAPI over raw COM calls on Windows; <code>malgo</code> on macOS</td><td><code>cpal</code> on every system</td></tr>
+    <tr><td>Application code</td><td>About 1,840 lines of Go and Objective-C</td><td>About 1,180 lines of Rust</td></tr>
+    <tr><td>Unit tests</td><td>29</td><td>33</td></tr>
+    <tr><td>Dependencies</td><td>1 module, used on macOS only. Windows uses the standard library alone</td><td>About 10 direct crates, about 135 in total once their own dependencies are counted</td></tr>
+    <tr><td>Low-level code</td><td>COM method calls by table index, manual memory layout of Windows structures</td><td>Three small <code>unsafe</code> calls: showing the native menu (two) and attaching to the console</td></tr>
+    <tr><td>Building for Windows from Linux</td><td>Works out of the box</td><td>Needs the MinGW toolchain, or build on Windows</td></tr>
+    <tr><td>macOS build needs</td><td>Go and the Xcode tools (cgo)</td><td>Rust and the Xcode tools</td></tr>
+    <tr><td>Checks in CI</td><td><code>gofmt</code>, <code>go vet</code>, <code>go test</code></td><td><code>cargo fmt</code>, <code>cargo clippy</code> with warnings as errors, <code>cargo test</code></td></tr>
+    <tr><td>Minimum toolchain</td><td>Go 1.27</td><td>Rust 1.95</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Which one to prefer</h3>
+
+<p>The Go version is the leaner program: smaller, almost no dependencies, and it draws without a graphics driver. The Rust version is the leaner codebase: one implementation instead of two, less low-level code, and output metering on macOS in principle. If the program only ever needs to run on Windows, the Go version has less that can go wrong. If the macOS side matters or the code will keep growing, the Rust version is easier to maintain.</p>
+
+<h2 id="tested">What was tested</h2>
+
+<div class="note">
+  <p>This rewrite has not been run on a real Windows or macOS machine. Treat it as a candidate to try, not as a drop-in replacement, until it has.</p>
+</div>
+
+<ul>
+  <li><strong>Checked on Linux:</strong> formatting, lints with warnings as errors, and all 33 unit tests. Lints also pass for the Windows target.</li>
+  <li><strong>Checked under Wine</strong> (the Windows build, with virtual sound devices and test audio): input metering, the native menu and both device submenus, switching devices, showing both meters, the window resizing, dragging, saving and restoring settings, first-run placement, and <code>--probe</code> printing to the terminal.</li>
+  <li><strong>Not testable under Wine:</strong> output metering. Wine does not implement capturing what is playing, so the output meter shows an error there. The Go version fails the same way under Wine.</li>
+  <li><strong>Not run at all:</strong> the macOS build, including the microphone permission prompt, output metering, and which way the window grows when the second meter is shown.</li>
+  <li><strong>Seen under Wine, unconfirmed elsewhere:</strong> a one-pixel light line along the top edge of the window.</li>
+</ul>
+
+<h2 id="develop">Development</h2>
+
+<pre><code>cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+cargo run --release</code></pre>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Path</th><th>Contents</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/main.rs</code></td><td>Command line, startup, <code>--probe</code></td></tr>
+    <tr><td><code>src/app.rs</code></td><td>The window: drawing, dragging, saved position</td></tr>
+    <tr><td><code>src/menu.rs</code></td><td>The right-click menu as data, and showing it</td></tr>
+    <tr><td><code>src/capture.rs</code></td><td>One capture thread per source, device lists, following the default device</td></tr>
+    <tr><td><code>src/meter.rs</code></td><td>Peak scanning and the bar's rise/fall logic</td></tr>
+    <tr><td><code>src/config.rs</code></td><td>Saved settings, including files written by the Go version</td></tr>
+    <tr><td><code>build_mac.sh</code></td><td>Builds and signs <code>gomic.app</code></td></tr>
+    <tr><td><code>.github/workflows</code></td><td>CI on Windows, macOS, and Linux; releases from <code>main</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer>
+  <p>MIT licensed. See <code>LICENSE</code>.</p>
+</footer>
+
+</main>
+</body>
+</html>

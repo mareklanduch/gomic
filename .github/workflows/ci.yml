@@ -17,29 +17,35 @@ concurrency:
   # never canceled, because a release depends on them.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   test:
     name: Test on ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        # Linux is not a supported platform, but it is the only place the
+        # in-window fallback menu gets compiled.
+        os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version-file: go.mod
+      - name: Install the Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
+
+      - name: Install ALSA headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev
 
       - name: Check formatting
-        shell: bash
-        run: test -z "$(gofmt -l .)"
+        run: cargo fmt --check
 
-      - name: go.mod and go.sum are tidy
-        run: go mod tidy -diff
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
 
-      - run: go vet ./...
-      - run: go test ./...
-      - run: go build ./...
+      - run: cargo test --locked
+      - run: cargo build --locked

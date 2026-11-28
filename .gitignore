@@ -1,10 +1,6 @@
 # Build output
-/gomic
-/gomic.exe
+/target/
 /gomic.app/
-*.exe
-*.test
-*.out
 
 # OS and editor clutter
 .DS_Store
